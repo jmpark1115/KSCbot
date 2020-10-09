@@ -92,6 +92,7 @@ class Worker(QThread):
         self.tot_run = tot_run
         self.mode = mode
 
+    @logging_time
     def run(self):
 
         while True:
@@ -197,7 +198,6 @@ class MyWindow(QMainWindow, gui_form):
 
     @pyqtSlot(str)
     def display_result(self, data):
-        logger.debug('===>display_result')
 
         try:
             self.textBrowser.append(data)
@@ -323,7 +323,7 @@ class MyWindow(QMainWindow, gui_form):
                                      .format(self.worker.bot.asks_qty, self.worker.bot.asks_price
                                              ,self.worker.bot.bids_qty, self.worker.bot.bids_price))
         self.worker.bot.Balance()
-        self.balance_Label.setText("{:.0f} {}\n{:.0f} {}"
+        self.balance_Label.setText("Target {:.0f} {}\nPayment {:.0f} {}"
                     .format(self.worker.bot.targetBalance, self.target,
                             self.worker.bot.baseBalance, self.payment))
         return
