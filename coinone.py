@@ -117,7 +117,7 @@ class Coinone(object):
         logger.debug('orderbook')
         try:
             payload = {**self.default_payload, 'currency': self.target}
-            resp = self.public_query('orderbook', payload)
+            resp = self._get('orderbook', payload)
             if resp == False:
                 return False
 
@@ -220,7 +220,7 @@ class Coinone(object):
 
         return False
 
-    def public_query(self, endpoint, param={}):
+    def _get(self, endpoint, param={}):
         url = API_URL + endpoint + '?' + urllib.parse.urlencode(param)
         try:
             resp = requests.get(url, timeout=self.GET_TIME_OUT)
@@ -322,6 +322,13 @@ class Coinone(object):
             pass
         except Exception as ex:
             logger.debug('db configuration error %s' % ex)
+
+    def save_mid_price(self, mid_price, bot_conf):
+        try:
+            bot_conf.mid_price = mid_price
+        except Exception as ex:
+            logger.debug('save mid_price error %s' % ex)
+        return
 
     def get_mid_price(self, bot_conf):
         try:
@@ -425,7 +432,7 @@ class Coinone(object):
             status, units_traded, avg_price, fee = self.review_order(order_id, qty, side)
             if units_traded != qty:
                 # tran.mark = True
-                self.Cancel(order_id, price, side)
+                self.Cancel(order_id, price, qty, side)
             # tran.avg_price   = avg_price
             # tran.fee         = fee
             # tran.save()
@@ -455,7 +462,7 @@ class Coinone(object):
         if not order_id:
             return
 
-        self.Cancel(order_id, price, 'SELL')
+        self.Cancel(order_id, price, qty, 'SELL')
         status, units_traded, avg_price, fee = self.review_order(order_id, qty, 'SELL')
         print('SEL status : {} units_traded : {}/{} at {} {}'
               .format(status, units_traded, qty, self.nickname,self.symbol))
@@ -499,10 +506,10 @@ class Coinone(object):
                                             self.bids_qty, self.bids_price, bot_conf)
 
         if qty <= 0 or price <= 0:
+            logger.debug('This is not trading situation {} {}' .format(self.nickname, self.symbol))
             text = 'This is not trading situation. {} {}\n'.format(self.nickname, self.symbol)
             msg += text
-            logger.debug('This is not trading situation {} {}' .format(self.nickname, self.symbol))
-            return
+            return msg
 
         if bot_conf.mode == 'random':
             if random.randint(0, 1) == 0:
@@ -523,8 +530,10 @@ class Coinone(object):
                 try:
                     status, order_id, content = self.Order(price, qty, 'SELL')
                     if status is not 'OK' or order_id == 0 or order_id == '' :
-                        logger.debug('fail to sell %s' % content)
-                        return
+                        text = 'fail to sell %s\n' % content
+                        msg += text
+                        logger.debug(text)
+                        return msg
                 except Exception as ex:
                     logger.error('fail to order')
                     return
@@ -548,21 +557,22 @@ class Coinone(object):
                     first_side = 'SELL'
                 except Exception as ex:
                     logger.error("db exception %s / %s" %(ex, args))
-                    return
+                    return msg
                 if status == "SKIP":  # filled or cancelled
                     # first.mark = True
                     # first.save()
-                    return
+                    return msg
+
                 elif status == "NG":  # partially filled
                     qty -= units_traded
                     if bot_conf.ex_min_qty > qty:
                         # first.mark = True
                         # first.save()
-                        text = 'qty {} is lower than min_qty {}'.format(qty, bot_conf.ex_min_qty)
+                        text = 'qty {} is lower than min_qty {}\n'.format(qty, bot_conf.ex_min_qty)
                         msg+= text
                         logger.debug(text)
-                        self.Cancel(order_id, price, 'SELL')
-                        return
+                        self.Cancel(order_id, price, qty, 'SELL')
+                        return msg
                     else:
                         prev_order_id = order_id
                 else:  # GO, unfilled
@@ -572,16 +582,17 @@ class Coinone(object):
                     status, order_id, content = self.Order(price, qty, 'BUY')
                     if status is not 'OK' or order_id == 0 or order_id == '':
                         logger.debug('fail to buy %s' % content)
+                        msg += 'fail to buy %s\n' % content
                         # first.mark = True
                         # first.save()
-                        self.Cancel(prev_order_id, first_price, first_side)
-                        return
+                        self.Cancel(prev_order_id, first_price, first_qty, first_side)
+                        return msg
                 except Exception as ex:
                     logger.error('fail to order %s' %ex)
                     # first.mark = True
                     # first.save()
-                    self.Cancel(prev_order_id, first_price, first_side)
-                    return
+                    self.Cancel(prev_order_id, first_price, first_qty, first_side)
+                    return msg
 
                 time.sleep(1)
                 status, units_traded, avg_price, fee = self.review_order(order_id, qty, 'BUY')
@@ -598,8 +609,8 @@ class Coinone(object):
                     #     self.baseBalance, order_id, 2, False, self.bids_price, self.asks_price)
                     # second = self.DB_WRITE(args)
                 except Exception as ex:
-                    logger.error("db exception %s / %s" %(ex, args))
-                    return
+                    logger.error("db exception %s" %ex)
+                    return msg
 
                 if status == "SKIP":  # filled, normal process
                     self.order_update(prev_order_id, first_price, first_qty, first_side)
@@ -611,17 +622,17 @@ class Coinone(object):
                     self.order_update(prev_order_id, first_price, first_qty, first_side)
                     qty -= units_traded
                     logger.debug('partially filled, cancel pending order {}'.format(qty))
-                    self.Cancel(order_id, price, 'BUY')
+                    self.Cancel(order_id, price, qty, 'BUY')
                     self.save_mid_price(price, bot_conf)
-                    return
+                    return msg
                 else: # GO
                     logger.debug('unfilled, cancel pending order')
                     # second.mark = True
                     # second.save()
                     self.order_update(prev_order_id, first_price, first_qty, first_side)
-                    self.Cancel(order_id, price, 'BUY')
+                    self.Cancel(order_id, price, qty, 'BUY')
                     self.save_mid_price(price, bot_conf)
-                    return
+                    return msg
             else:
                 logger.debug('skip sell2buy in drymode')
 
@@ -632,10 +643,11 @@ class Coinone(object):
                     status, order_id, content = self.Order(price, qty, 'BUY')
                     if status is not 'OK' or order_id == 0 or order_id == '' :
                         logger.debug('fail to buy %s' % content)
-                        return
+                        msg += 'fail to buy %s\n' % content
+                        return msg
                 except Exception as ex:
                     logger.error('fail to order')
-                    return
+                    return msg
 
                 time.sleep(0.1)
                 #
@@ -653,21 +665,22 @@ class Coinone(object):
                     first_qty    = qty
                     first_side = 'BUY'
                 except Exception as ex:
-                    logger.error("db exception %s / %s" %(ex, args))
-                    return
+                    logger.error("db exception %s" %ex)
+                    return msg
 
                 if status == "SKIP":  # filled or cancelled
                     # first.mark = True
                     # first.save()
-                    return
+                    return msg
                 elif status == "NG":  # partially filled
                     qty -= units_traded
                     if bot_conf.ex_min_qty > qty:
                         # first.mark = True
                         # first.save()
                         logger.debug('qty {} is lower than min_qty {}'.format(qty, bot_conf.ex_min_qty))
-                        self.Cancel(order_id, price, 'BUY')
-                        return
+                        msg += 'qty {} is lower than min_qty {}\n'.format(qty, bot_conf.ex_min_qty)
+                        self.Cancel(order_id, price, qty, 'BUY')
+                        return msg
                     else:
                         prev_order_id = order_id
                 else:  # GO, unfilled
@@ -678,16 +691,17 @@ class Coinone(object):
                     status, order_id, content = self.Order(price, qty, 'SELL')
                     if status is not 'OK' or order_id == 0 or order_id == '' :
                         logger.debug('fail to sell %s' % content)
+                        msg += 'fail to sell %s\n' % content
                         # first.mark = True
                         # first.save()
-                        self.Cancel(prev_order_id, first_price , first_side)
-                        return
+                        self.Cancel(prev_order_id, first_price , first_qty, first_side)
+                        return msg
                 except Exception as ex:
                     logger.error('fail to order %s' % content)
                     # first.mark = True
                     # first.save()
-                    self.Cancel(prev_order_id, first_price , first_side)
-                    return
+                    self.Cancel(prev_order_id, first_price , first_qty, first_side)
+                    return msg
 
                 time.sleep(1)
                 status, units_traded, avg_price, fee = self.review_order(order_id, qty, 'SELL')
@@ -703,8 +717,8 @@ class Coinone(object):
                     #         self.baseBalance, order_id, 2, False, self.bids_price, self.asks_price)
                     # second = self.DB_WRITE(args)
                 except Exception as ex:
-                    logger.error("db exception %s / %s" %(ex, args))
-                    return
+                    logger.error("db exception %s / %s" %ex)
+                    return msg
 
                 if status == "SKIP":  # filled
                     self.order_update(prev_order_id, first_price, first_qty, first_side)
@@ -716,17 +730,17 @@ class Coinone(object):
                     self.order_update(prev_order_id, first_price, first_qty, first_side)
                     qty -= units_traded
                     logger.debug('partially filled, cancel pending order {}'.format(qty))
-                    self.Cancel(order_id, first_price, first_side)
+                    self.Cancel(order_id, first_price, first_qty, first_side)
                     self.save_mid_price(price, bot_conf)
-                    return
+                    return msg
                 else: # GO
                     logger.debug('unfilled, cancel pending order')
                     # second.mark = True
                     # second.save()
                     self.order_update(prev_order_id, first_price, first_qty, first_side)
-                    self.Cancel(order_id, first_price, first_side)
+                    self.Cancel(order_id, first_price, first_qty, first_side)
                     self.save_mid_price(price, bot_conf)
-                    return
+                    return msg
         else:
             logger.debug('Invalid mode')
 
