@@ -69,13 +69,17 @@ error_code = {
     '1209': "User not found"
 }
 
-class Common(object):
+class Coinone(object):
 
     def __init__(self, api_key, api_secret, target, payment):
+
         self.connect_key = api_key
         self.secret_key = api_secret
-        self.target = target
-        self.payment = payment
+        self.target = target.lower()
+        self.payment = payment.lower()
+        self.nickname = 'coinone'
+        self.symbol = '%s/%s' %(self.target, self.payment)
+
         self.targetBalance = 0
         self.baseBalance = 0
         self.bids_qty = 0
@@ -83,16 +87,234 @@ class Common(object):
         self.asks_qty = 0
         self.asks_price = 0
 
-        bot_conf = None
         # self.get_config()
         self.GET_TIME_OUT = 30
         self.POST_TIME_OUT = 60
 
         self.mid_price = 0 # previous mid_price
 
-        self.nickname = 'coinone'
-        self.symbol = '%s/%s' %(self.target, self.payment)
+        self.id = id
+        self.mid_price = 0 # previous mid_price
+        self.default_payload = {"access_token": self.connect_key}
 
+
+    def info(self):
+        return self._post('v2/account/user_info')
+
+    def balance(self):
+        return self._post('v2/account/balance')
+
+    def daily_balance(self):
+        return self._post('v2/account/daily_balance')
+
+    def deposit_address(self):
+        return self._post('v2/account/deposit_address')
+
+    def virtual_account(self):
+        return self._post('v2/account/virtual_account')
+
+    def Orderbook(self):
+        logger.debug('orderbook')
+        try:
+            payload = {**self.default_payload, 'currency': self.target}
+            resp = self.public_query('orderbook', payload)
+            if resp == False:
+                return False
+
+            if isinstance(resp, dict):
+                self.asks_qty = self.asks_price = self.bids_qty = self.bids_price = 0
+                if 'ask' in resp and resp['ask']:
+                    self.asks_price = float(resp['ask'][0]['price'])
+                    self.asks_qty = float(resp['ask'][0]['qty'])
+                if 'bid' in resp and resp['bid']:
+                    self.bids_price = float(resp['bid'][0]['price'])
+                    self.bids_qty = float(resp['bid'][0]['qty'])
+                return True
+
+        except Exception as ex:
+            logger.error(f'exception occur {ex}_{self.nickname}')
+
+        return False
+
+    def Balance(self):
+        logger.debug('balance')
+        try:
+            resp = self._post('v2/account/balance')
+            if resp == False:
+                return False
+
+            if isinstance(resp, dict):
+                self.targetBalance = self.baseBalance = 0
+                if self.target in resp and resp[self.target]:
+                    self.targetBalance = float(resp[self.target.lower()]["avail"])
+                if self.payment in resp and resp[self.payment]:
+                    self.baseBalance   = float(resp[self.payment.lower()]["avail"])
+                return True
+
+        except Exception as ex:
+            logging.debug(f"balance exception occur {ex}_{self.nickname}")
+
+        return False
+
+    def Order(self, price, qty, side):
+        logger.debug('Order')
+        order_id = 0
+        status = 'ERROR'
+        content = False
+
+        try:
+            payload = {**self.default_payload,
+                       'price': price,
+                       'qty': qty,
+                       'currency': self.target}
+            path = 'v2/order/limit_sell' if side == 'SELL' else 'v2/order/limit_buy'
+            content = self._post(path, payload)
+            if content == False:
+                return status, order_id, content
+
+            if isinstance(content, dict):
+                status = "OK" if content["result"] == "success" else "ERROR"
+                if status == 'OK' and 'orderId' in content and content['orderId']:
+                    order_id = content['orderId']  # string
+                    if not order_id:
+                        status = 'ERROR'
+                        order_id = 0
+
+        except Exception as ex:
+            logging.debug(f"balance exception occur {ex}_{self.nickname}")
+
+        return status, order_id, content
+
+
+    def Order_info(self, order_id):
+        logger.debug('order_info')
+        payload = {**self.default_payload, 'currency': self.target, 'order_id': order_id}
+        resp = self._post('v2/order/order_info', payload)
+        if resp == False:
+            return False
+
+        return resp
+
+
+    def Cancel(self, order_id, price, qty, side):
+        logger.debug('cancel')
+        try:
+            payload = {**self.default_payload,
+                       'price': price,
+                       'qty': qty,
+                       'is_ask': 1 if side == 'SELL' else 0,
+                       'order_id': order_id,
+                       'currency': self.target}
+            path = 'v2/order/cancel'
+            resp = self._post(path, payload)
+            if resp == False:
+                return False
+
+            if isinstance(resp, dict):
+                if 'result' in resp and resp['result']:
+                    if resp['result'] == 'success':
+                        return True
+
+        except Exception as ex:
+            logging.debug(f"balance exception occur {ex}_{self.nickname}")
+
+        return False
+
+    def public_query(self, endpoint, param={}):
+        url = API_URL + endpoint + '?' + urllib.parse.urlencode(param)
+        try:
+            resp = requests.get(url, timeout=self.GET_TIME_OUT)
+            if resp.status_code == 200:
+                resp = resp.json()
+                return resp
+            else:
+                logger.error('http_request_{}_{}_{}_{}'.format('POST', url, resp.json()))
+                return False
+
+        except Exception as ex:
+            logger.error('http_request_{}_{}_{}'.format(url, param, ex))
+
+        return False
+
+    def _post(self, url, payload=None):
+
+        def encode_payload(payload):
+            payload[u'nonce'] = int(time.time()*1000)
+            ret = json.dumps(payload).encode()
+            return base64.b64encode(ret)
+
+        def get_signature(encoded_payload, secret_key):
+            signature = hmac.new(secret_key.upper().encode(), encoded_payload, hashlib.sha512)
+            return signature.hexdigest()
+
+        def get_response(url, payload):
+            try:
+                encoded_payload = encode_payload(payload)
+                headers = {
+                    'Content-type': 'application/json',
+                    'X-COINONE-PAYLOAD': encoded_payload,
+                    'X-COINONE-SIGNATURE': get_signature(encoded_payload, self.secret_key)
+                }
+                cont = ""
+                resp = requests.post(API_URL + url, encoded_payload, headers=headers)
+                if resp.status_code == 200:
+                    resp = resp.json()
+                    return resp
+                else:
+                    logger.error('http_request_{}_{}_{}_{}'.format('POST', url, payload, resp.json()))
+
+            except Exception as ex:
+                logger.error('http_request_{}_{}_{}'.format(url, payload, ex))
+
+            return False
+
+        if payload is None:
+            payload = self.default_payload
+        res = ""
+
+        res = get_response(url, payload)
+        if res == False:
+            return False
+
+        return res
+
+
+    def Order_info(self, order_id):
+        logger.debug('order_info')
+        payload = {**self.default_payload, 'currency': self.target, 'order_id': order_id}
+        resp = self._post('v2/order/order_info', payload)
+        if resp == False:
+            return False
+        return resp
+
+    def review_order(self, order_id, _qty, side=None):
+        units_traded = 0
+        resp = None
+        getcontext().prec = 10
+
+        try:
+            resp = self.Order_info(order_id)
+            if 'result' in resp and resp['result'] == 'success':
+                if 'status' in resp and resp['status'] :
+                    status = resp['status']
+                    units_traded = float(D(_qty) - D(float(resp["info"]["remainQty"])))
+                    avg_price = float(resp['info']['price'])
+                    fee = float(resp['info']['fee'])
+                    if units_traded == 0 : # live, unfilled
+                        return 'GO', units_traded, avg_price, fee
+                    elif units_traded < _qty :  # 'partial filled
+                        return 'NG', units_traded, avg_price, fee
+                    else:  # filled or canceled
+                        return 'SKIP', units_traded, avg_price, fee
+
+            logger.debug("response error {}_{}" .format(self.nickname, resp))
+
+        except Exception as ex:
+            logger.debug("Exception error in review order {}_{}_{}" .format(self.nickname, resp, ex))
+
+        return "SKIP", 0, 0, 0
+
+    #=======================================================================
     def get_config(self):
         logger.debug('get_config')
         try:
@@ -191,13 +413,7 @@ class Common(object):
 
         return TradeSize, price
 
-    def job_function(self):
-        print("ticker", "| [time] "
-              , str(time.localtime().tm_hour) + ":"
-              + str(time.localtime().tm_min) + ":"
-              + str(time.localtime().tm_sec))
 
-    # def order_update(self, order_id, tran):
     def order_update(self, order_id, price, qty, side):
 
         # first try update
@@ -520,258 +736,3 @@ class Common(object):
 
     def DB_WRITE(self, args):
         return 'OK'
-
-
-class Coinone(Common):
-
-    def __init__(self, api_key, api_secret, target, payment):
-        super().__init__(api_key, api_secret, target, payment)
-
-        self.id = id
-        self.mid_price = 0 # previous mid_price
-        self.default_payload = {"access_token": self.token}
-
-    def info(self):
-        return self._post('v2/account/user_info')
-
-    def balance(self):
-        return self._post('v2/account/balance')
-
-    def daily_balance(self):
-        return self._post('v2/account/daily_balance')
-
-    def deposit_address(self):
-        return self._post('v2/account/deposit_address')
-
-    def virtual_account(self):
-        return self._post('v2/account/virtual_account')
-
-    def orderbook(self, currency='btc'):
-        payload = {**self.default_payload, 'currency': currency}
-        # return self._post('orderbook', payload)
-        return self.public_query('orderbook', payload)
-
-    def orders(self, currency='btc'):
-        payload = {**self.default_payload, 'currency': currency}
-        return self._post('v2/order/limit_orders', payload)['limitOrders']
-
-    def complete_orders(self, currency='btc'):
-        payload = {**self.default_payload, 'currency': currency}
-        return self._post('v2/order/complete_orders', payload)['completeOrders']
-
-    def order_info(self, currency='btc', order_id=None):
-        payload = {**self.default_payload, 'currency': currency, 'order_id': order_id}
-        return self._post('v2/order/order_info', payload)
-        #['orderInfo']
-
-    def cancel(self, currency='btc',
-               order_id=None, price=None, qty=None, is_ask=None, **kwargs):
-        """
-        cancel an order.
-        If all params are empty, it will cancel all orders.
-        """
-        if all(param is None for param in (order_id, price, qty, is_ask)):
-            payload = {**self.default_payload, 'currency': currency}
-            url = 'order/cancel_all'
-        elif 'type' in kwargs and 'orderId' in kwargs:
-            payload = {**self.default_payload,
-                       'price': price,
-                       'qty': qty,
-                       'is_ask': 1 if kwargs['type'] == 'ask' else 0,
-                       'order_id': kwargs['orderId'],
-                       'currency': currency}
-            url = 'v2/order/cancel'
-        else:
-            payload = {**self.default_payload,
-                       'order_id': order_id,
-                       'price': price,
-                       'qty': qty,
-                       'is_ask': is_ask,
-                       'currency': currency}
-            url = 'v2/order/cancel'
-        #logger.debug('Cancel: %s' % payload)
-        return self._post(url, payload)
-
-    def buy(self, currency, qty=None, price=None, **kwargs):
-        """
-        make a buy order.
-        if quantity is not given, it will make a market price order.
-        """
-        if qty is None:
-            payload = {**self.default_payload,
-                       'price': price,
-                       'currency': currency.lower()}
-            url = 'v2/order/market_buy'
-        else:
-            payload = {**self.default_payload,
-                       'price': price,
-                       'qty': qty,
-                       'currency': currency.lower()}
-            url = 'v2/order/limit_buy'
-        response = self._post(url, payload)
-        status = "OK" if response["result"] == "success" else "ERROR"
-        orderNumber = response.get("orderId", "orderID is not key")
-        return status, orderNumber, response
-
-    def sell(self, currency, qty=None, price=None, **kwargs):
-        """
-        make a sell order.
-        if price is not given, it will make a market price order.
-        """
-        if price is None:
-            payload = {**self.default_payload,
-                       'qty': qty,
-                       'currency': currency.lower()}
-            url = 'v2/order/market_sell'
-        else:
-            payload = {**self.default_payload,
-                       'price': price,
-                       'qty': qty,
-                       'currency': currency.lower()}
-            url = 'v2/order/limit_sell'
-        # logger.debug('Sell: %s' % payload)
-        response = self._post(url, payload)
-        status = "OK" if response["result"] == "success" else "ERROR"
-        orderNumber = response.get("orderId", "orderID is not key")
-        return status, orderNumber, response
-
-    """
-    URL = 'https://api.coinone.co.kr/v2/transaction/coin/'
-        PAYLOAD = {
-        "access_token": ACCESS_TOKEN,
-        "address": "receiver address",
-        "auth_number": 123456,
-        "qty": 0.1,
-        "currency": "btc",
-        }
-    """
-
-    def auth_number(self, currency):
-        payload = {**self.default_payload,
-                   "type": currency,
-                   }
-        url = 'v2/transaction/auth_number/'
-        response = self._post(url, payload)
-        status = "OK" if response["result"] == "success" else "ERROR"
-        return status, response
-
-    #i have to wait to be opened 2017.09.04
-    def send_coin(self, currency, dest_address, units):
-        payload = {**self.default_payload,
-                   "address"    : dest_address,
-                   "qty"        : units,   #float
-                   "currency"   : currency,
-                   "auth_number": '543256'
-                   }
-        url = 'v2/transaction/coin'
-        response = self._post(url, payload)
-        status = "OK" if response["result"] == "success" else "ERROR"
-        return status, response
-
-    def send_btc(self, currency, dest_address, from_address, units):
-        payload = {**self.default_payload,
-                   "address"    : dest_address,
-                   "qty"        : units,   #float
-                   "type"       : 'trade',
-                   "currency"   : currency,
-                   "auth_number": 543256,
-                   "from_address" : from_address,
-                   }
-        url = 'v2/transaction/btc'
-        response = self._post(url, payload)
-        status = "OK" if response["result"] == "success" else "ERROR"
-        return status, response
-
-    def public_query(self, endpoint, param={}):
-        url = base_url + endpoint + '?' + urllib.parse.urlencode(param)
-        try:
-            ret = urllib.request.urlopen(urllib.request.Request(url), timeout=self.timeout)
-            return json.loads(ret.read())
-        except:
-            print("public query failed")
-        return ret
-
-    def _post(self, url, payload=None):
-        def encode_payload(payload):
-            payload[u'nonce'] = int(time.time()*1000)
-            ret = json.dumps(payload).encode()
-            return base64.b64encode(ret)
-
-        def get_signature(encoded_payload, secret_key):
-            signature = hmac.new(secret_key.upper().encode(), encoded_payload, hashlib.sha512)
-            return signature.hexdigest()
-
-        def get_response(url, payload, key):
-            encoded_payload = encode_payload(payload)
-            headers = {
-                'Content-type': 'application/json',
-                'X-COINONE-PAYLOAD': encoded_payload,
-                'X-COINONE-SIGNATURE': get_signature(encoded_payload, key)
-            }
-            cont = ""
-            req = urllib.request.Request(url, encoded_payload, headers=headers)
-            try:
-                cont = urllib.request.urlopen(req, timeout=self.timeout)
-                cont = cont.read()
-            except:
-                print("url open failed")
-            return cont
-
-        if payload is None:
-            payload = self.default_payload
-        res = ""
-        try:
-            res = get_response(base_url+url, payload, self.key)
-            res = json.loads(res)
-            if res['result'] == 'error':
-                err = res['errorCode']
-                # raise Exception(int(err), error_code[err])
-                print("error raised - {%d}-{%d}" % (int(err), error_code[err]))
-        except:
-            print("coinone get response error")
-        return res
-
-    def get_order_info(self, currency):
-        marketinfo = self.orderbook(currency)
-        self.askprice = float(marketinfo['ask'][0]['price'])
-        self.askqty   = float(marketinfo['ask'][0]['qty'])
-        self.bidprice = float(marketinfo['bid'][0]['price'])
-        self.bidqty   = float(marketinfo['bid'][0]['qty'])
-
-
-    def get_balance_info(self, currency):
-        try:
-            balance = self.balance()
-            self.targetBalance = (float)(balance[currency.lower()]["avail"])
-            self.baseBalance   = (float)(balance['krw'.lower()]["avail"])
-            # logging.info("**{} : (tBal: {:.8f}) | (pBal: {:.4f})**"
-            #         .format(self.exid, self.targetBalance, self.baseBalance))
-        except:
-            logging.debug("get_balance_info error occurred")
-
-    def review_cancel_order(self, orderNumber, type, currency, price, qty):
-        units_traded = 0
-        count = 0
-        while True:
-            count += 1
-            resp = self.order_info(currency, orderNumber)
-            print("co: response %s" % resp)
-            if resp["result"] == "success" :
-                if resp["status"] != 'filled':  # partially_filled, live
-                    if count < 10:
-                        print("loop %d" % count)
-                        time.sleep(0.1)
-                        continue
-                    else:
-                        units_traded = qty - (float)(resp["info"]["remainQty"])
-                        print("units_traded %.4f" % units_traded)
-                        is_ask = 1 if type == "ask" else 0
-                        resp = self.cancel(currency, orderNumber, price, qty, is_ask)
-                        print("co: cancel %s" % resp)
-                        return "NG", (qty - units_traded)
-                else: # filled
-                     return "GO", qty
-            else:
-                    print("id number not exist %s" % resp)
-                    return "NG", 0
-
