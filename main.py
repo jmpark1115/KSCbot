@@ -16,7 +16,7 @@ try:
 except :
     raise ValueError
 
-gui_form = uic.loadUiType('kStarBot.ui')[0]
+gui_form = uic.loadUiType('kscbot.ui')[0]
 
 def logging_time(func):
     def logged(*args, **kwargs):
@@ -28,6 +28,7 @@ def logging_time(func):
     return logged
 
 def get_logger():
+    # 로거
     logger = logging.getLogger("KSC Bot")
     logger.setLevel(logging.DEBUG)
 
@@ -56,10 +57,11 @@ def print_ps():
     return _ps
 
 class Worker(QThread):
-
+    # 워커 클래스
     update_signal = pyqtSignal(str)
 
     def __init__(self):
+        # 초기화 함수
         super().__init__()
 
         # Load Config File
@@ -87,6 +89,7 @@ class Worker(QThread):
 
 
     def set_run(self, price, qty, tot_run, mode):
+        # 구동 정보 셋업
         self.price = price
         self.qty  = qty
         self.tot_run = tot_run
@@ -94,68 +97,22 @@ class Worker(QThread):
 
     @logging_time
     def run(self):
-
+        # 무한루핑
         while True:
             if ps.run_flag:
                self.result = {}
                ret = self.bot.self_trading(ps)
-               # ret = self.bot.api_test(ps)
                if ret:
                     self.update_signal.emit(ret)
-               # return # one time do
 
             self.msleep(1000)
 
 
-    def seek_balance(self):
-        try:
-            self.bot.Balance()
-            return self.bot.targetBalance, self.bot.baseBalance
-        except Exception as ex:
-            logger.debug("seek balance error %s" %ex)
-            return 0, 0
-
-    def seek_orderbook(self, coin):
-        try:
-            self.bot.Orderbook(coin) #jmpark
-            return self.bot.askprice, self.bot.bidprice, self.bot.askqty, self.bot.bidqty
-        except Exception as ex:
-            logger.debug("seek orderbook error %s" %ex)
-            return 0, 0, 0, 0
-
-    def seek_ticker(self, coin):
-        try:
-            self.bot.Ticker(coin)
-            return self.bot.ticker
-        except Exception as ex:
-            logger.debug("seek ticker error %s" % ex)
-            return 0
-
-    def seek_spread(self, bid, ask):
-        if self.tick_interval == 0.0 :
-            return ValueError
-        tick_floor = 1/self.tick_interval
-        mid_price = (bid + ask) / 2
-        mid_price = math.floor(mid_price * tick_floor) / tick_floor  # 버림처리
-        if bid < mid_price < ask:
-            return mid_price
-        else:
-            return 0
-
-    def seek_midprice(self):
-
-        self.seek_orderbook(self.coin)
-        mid_price = self.seek_spread(self.bot.bidprice, self.bot.askprice)
-        if mid_price <= 0:
-            logger.debug('No spread : bids_price {} < mid_price {} < asks_price {}'
-                         .format(self.bot.bidprice, mid_price, self.bot.askprice))
-            return "Wait"
-        else:
-            return mid_price
-
 class MyWindow(QMainWindow, gui_form):
+    # GUI 및 제어 클래스
 
     def __init__(self):
+        # 초기화
         super().__init__()
         self.setupUi(self)
 
@@ -198,14 +155,14 @@ class MyWindow(QMainWindow, gui_form):
 
     @pyqtSlot(str)
     def display_result(self, data):
-
+        # 워커의 결과 출력
         try:
             self.textBrowser.append(data)
         except Exception as ex:
             logger.debug('display_result fail %s' %ex)
 
     def MyDialgo(self):
-
+        # 다이얼로그 창에 설정 값 표시
         self.fr_price_lineEdit.setText('{:.2f}' .format(ps.fr_price))
         self.to_price_lineEdit.setText('{:.2f}' .format(ps.to_price))
         self.fr_time_lineEdit.setText(str(ps.fr_time))
@@ -235,6 +192,7 @@ class MyWindow(QMainWindow, gui_form):
         self.textBrowser.append('시스템 OK!')
 
     def confirm_cmd(self):
+        # 컨펌 명령
         logger.debug('confirm cmd')
         self.user_confirm = False
 
@@ -330,6 +288,7 @@ class MyWindow(QMainWindow, gui_form):
 
     # https://stackoverflow.com/questions/18925241/send-additional-variable-during-pyqt-pushbutton-click
     def action_cmd(self, state):
+        # 액션 명령
         logger.debug('action cmd')
 
         # check deadline
@@ -355,6 +314,7 @@ class MyWindow(QMainWindow, gui_form):
         return
 
     def stop_cmd(self):
+        # 스탑 명령
         logger.debug('stop_cmd')
 
         ps.run_flag = 0
@@ -362,6 +322,7 @@ class MyWindow(QMainWindow, gui_form):
         return
 
     def mode_cmd(self):
+        # 모드 변경 명령
         if self.sell_radioButton.isChecked():
             mode = 'sell'
             print('sell')
@@ -379,6 +340,7 @@ class MyWindow(QMainWindow, gui_form):
         return
 
     def autoinput_cmd(self):
+        # 자동입력 명령
         val = self.worker.seek_midprice()
         if val == "Wait":
             self.price_lineEdit.setText("{}".format(val))
@@ -387,10 +349,12 @@ class MyWindow(QMainWindow, gui_form):
             self.price_lineEdit.setText("{}" .format(val))
 
     def delete_logs_cmd(self):
+        # 로그 삭제 명령
         self.textBrowser.clear()
 
 
 def main_QApp():
+    # 메인 함수
     app = QApplication(sys.argv)
     main_dialog = MyWindow()
     main_dialog.show()
