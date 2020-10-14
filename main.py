@@ -9,7 +9,6 @@ import logging
 import math
 import time
 
-from deadline import isDeadline
 from coinone import Coinone
 try:
     from config import ps
@@ -250,10 +249,8 @@ class MyWindow(QMainWindow, gui_form):
 
         if self.sell_radioButton.isChecked():
             mode = 'sell'
-            print('sell')
         elif self.buy_radioButton.isChecked():
             mode = 'buy'
-            print('buy')
         elif self.random_radioButton.isChecked():
             mode = 'random'
         else:
@@ -286,23 +283,21 @@ class MyWindow(QMainWindow, gui_form):
                             self.worker.bot.baseBalance, self.payment))
         return
 
-    # https://stackoverflow.com/questions/18925241/send-additional-variable-during-pyqt-pushbutton-click
     def action_cmd(self, state):
         # 액션 명령
         logger.debug('action cmd')
 
         # check deadline
-
-        check = isDeadline()
-        if check == 'NG':
-            self.textBrowser.append('사용기간이 만료되었습니다')
-            return "Error"
-        elif check == 'ERROR':
-            self.textBrowser.append('네트워크를 점검해 주세요')
-            return "Error"
-        else:
-            self.textBrowser.append('Bot Validation OK')
-
+        # from deadline import isDeadline
+        # check = isDeadline()
+        # if check == 'NG':
+        #     self.textBrowser.append('사용기간이 만료되었습니다')
+        #     return "Error"
+        # elif check == 'ERROR':
+        #     self.textBrowser.append('네트워크를 점검해 주세요')
+        #     return "Error"
+        # else:
+        #     self.textBrowser.append('Bot Validation OK')
         # end check deadline
 
         if not self.user_confirm:  # 입력 ok ?
@@ -318,17 +313,15 @@ class MyWindow(QMainWindow, gui_form):
         logger.debug('stop_cmd')
 
         ps.run_flag = 0
-        self.textBrowser.append( '정지합니다')
+        self.textBrowser.append( '진행 중 매매를 완료 후 정지합니다')
         return
 
     def mode_cmd(self):
         # 모드 변경 명령
         if self.sell_radioButton.isChecked():
             mode = 'sell'
-            print('sell')
         elif self.buy_radioButton.isChecked():
             mode = 'buy'
-            print('buy')
         elif self.random_radioButton.isChecked():
             mode = 'random'
         else:
@@ -338,15 +331,6 @@ class MyWindow(QMainWindow, gui_form):
 
         ps.mode = mode
         return
-
-    def autoinput_cmd(self):
-        # 자동입력 명령
-        val = self.worker.seek_midprice()
-        if val == "Wait":
-            self.price_lineEdit.setText("{}".format(val))
-            self.textBrowser.append("Please wait. No spread")
-        else:
-            self.price_lineEdit.setText("{}" .format(val))
 
     def delete_logs_cmd(self):
         # 로그 삭제 명령
