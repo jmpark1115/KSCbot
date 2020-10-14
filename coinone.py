@@ -91,12 +91,7 @@ class Coinone(object):
         self.GET_TIME_OUT = 30
         self.POST_TIME_OUT = 60
 
-        self.mid_price = 0 # previous mid_price
-
-        self.id = id
-        self.mid_price = 0 # previous mid_price
         self.default_payload = {"access_token": self.connect_key}
-
 
     def info(self):
         return self._post('v2/account/user_info')
@@ -314,27 +309,7 @@ class Coinone(object):
     def get_config(self):
         # 미사용
         logger.debug('get_config')
-        try:
-            # bot_conf = AutoBot.objects.get(id=self.id)
-            pass
-        except Exception as ex:
-            logger.debug('db configuration error %s' % ex)
-
-    def save_mid_price(self, mid_price, bot_conf):
-        # 이전 주문 가격 저장
-        try:
-            bot_conf.mid_price = mid_price
-        except Exception as ex:
-            logger.debug('save mid_price error %s' % ex)
         return
-
-    def get_mid_price(self, bot_conf):
-        # 이전 주문 가격 호출
-        try:
-            return bot_conf.mid_price
-        except Exception as ex:
-            logger.debug('get mid_price error %s' % ex)
-            return 0
 
     def seek_spread(self, bid, ask, bot_conf):
         # 스프레드 구하기
@@ -347,7 +322,6 @@ class Coinone(object):
         while True:
             sum = float(D(bid) + D(i) * D(tick_interval))
             if bid < sum < ask:
-                # result = math.floor(sum * tick_floor) / tick_floor
                 result = float(D(math.floor(D(sum) * D(tick_floor))) / D(tick_floor))
                 if result != bid:
                     sp.append(result)
@@ -361,9 +335,6 @@ class Coinone(object):
         logger.debug('from_off {} to_off {}' .format(from_off, to_off) )
         sp = sp[from_off:to_off]
         size = len(sp)
-        # Avoid same price
-        if self.mid_price in sp and size > 1:
-            sp.remove(self.mid_price)
         if size:
             random.shuffle(sp)
             return sp.pop()
@@ -449,9 +420,6 @@ class Coinone(object):
         logger.debug('{} {} Time {}'.format(self.nickname, self.symbol, mother))
         time.sleep(mother)
 
-        self.mid_price = bot_conf.mid_price #self.get_mid_price()
-        logger.debug('previous mid price {}' .format(self.mid_price))
-
         self.Balance()
         before_m = 'Before: target {} - base {}'.format(self.targetBalance, self.baseBalance)
 
@@ -506,7 +474,7 @@ class Coinone(object):
                     logger.error('fail to order')
                     return
 
-                time.sleep(0.01)
+                time.sleep(0.1)
                 #
                 status, units_traded, avg_price, fee = self.review_order(order_id, qty, 'SELL')
                 text = 'SEL status : {} units_traded : {}/{} at {} {} with {}\n' .format(status, units_traded, qty, self.nickname, self.symbol, order_id)
@@ -514,17 +482,11 @@ class Coinone(object):
                 logger.debug(text)
                 args = ''
 
-                try:
-                    pass
-                    first_price  = price
-                    first_qty    = qty
-                    first_side = 'SELL'
-                except Exception as ex:
-                    logger.error("db exception %s / %s" %(ex, args))
-                    return msg
+                first_price  = price
+                first_qty    = qty
+                first_side = 'SELL'
+
                 if status == "SKIP":  # filled or cancelled
-                    # first.mark = True
-                    # first.save()
                     return msg
 
                 elif status == "NG":  # partially filled
@@ -561,20 +523,17 @@ class Coinone(object):
 
                 if status == "SKIP":  # filled, normal process
                     self.order_update(prev_order_id, first_price, first_qty, first_side)
-                    self.save_mid_price(price, bot_conf)
                     pass
                 elif status == "NG":  # partially filled
                     self.order_update(prev_order_id, first_price, first_qty, first_side)
                     qty -= units_traded
                     logger.debug('partially filled, cancel pending order {}'.format(qty))
                     self.Cancel(order_id, price, qty, 'BUY')
-                    self.save_mid_price(price, bot_conf)
                     return msg
                 else: # GO
                     logger.debug('unfilled, cancel pending order')
                     self.order_update(prev_order_id, first_price, first_qty, first_side)
                     self.Cancel(order_id, price, qty, 'BUY')
-                    self.save_mid_price(price, bot_conf)
                     return msg
             else:
                 logger.debug('skip sell2buy in drymode')
@@ -598,17 +557,12 @@ class Coinone(object):
                 text = 'BUY status : {} units_traded : {}/{} at {} with {}\n'.format(status, units_traded, qty, self.nickname, self.symbol, order_id)
                 msg += text
                 logger.debug(text)
-                try:
-                    first_price  = price
-                    first_qty    = qty
-                    first_side = 'BUY'
-                except Exception as ex:
-                    logger.error("db exception %s" %ex)
-                    return msg
+
+                first_price  = price
+                first_qty    = qty
+                first_side = 'BUY'
 
                 if status == "SKIP":  # filled or cancelled
-                    # first.mark = True
-                    # first.save()
                     return msg
                 elif status == "NG":  # partially filled
                     qty -= units_traded
@@ -644,28 +598,18 @@ class Coinone(object):
 
                 if status == "SKIP":  # filled
                     self.order_update(prev_order_id, first_price, first_qty, first_side)
-                    self.save_mid_price(price, bot_conf)
                     pass
                 elif status == "NG":  # partially filled
                     self.order_update(prev_order_id, first_price, first_qty, first_side)
                     qty -= units_traded
-                    logger.debug('partially filled, cancel pending order {}'.format(qty))
                     self.Cancel(order_id, first_price, first_qty, first_side)
-                    self.save_mid_price(price, bot_conf)
                     return msg
                 else: # GO
-                    logger.debug('unfilled, cancel pending order')
                     self.order_update(prev_order_id, first_price, first_qty, first_side)
                     self.Cancel(order_id, first_price, first_qty, first_side)
-                    self.save_mid_price(price, bot_conf)
                     return msg
         else:
             logger.debug('Invalid mode')
 
         logger.debug('<-- Trading End {} {} elapsed time {:.2f}\n' .format(self.nickname, self.symbol, time.time()-start))
-        # self.Balance()
         return msg
-
-    def DB_WRITE(self, args):
-        # 미사용
-        return 'OK'
